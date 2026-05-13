@@ -1,15 +1,15 @@
 from fastapi import APIRouter
-
 from app.api.v1.endpoints import (
-	ai_interpretation,
-	auth,
-	chat,
-	contact,
-	health,
-	lab_result,
-	medical_case,
-	notification,
-	waitlist,
+        ai_interpretation,
+        auth,
+        chat,
+        contact,
+        health,
+        lab_result,
+        medical_case,
+        notification,
+        ocr,
+        waitlist,
 )
 
 api_router = APIRouter()
@@ -22,3 +22,4 @@ api_router.include_router(chat.router)
 api_router.include_router(notification.router)
 api_router.include_router(waitlist.router)
 api_router.include_router(contact.router)
+api_router.include_router(ocr.router)
