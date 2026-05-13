@@ -3,8 +3,11 @@ import logging
 from celery import shared_task
 
 from app.models.otp import OtpPurpose
-from app.services.auth.email import send_otp_email
-from app.services.email import send_password_reset_email
+from app.services.auth.email import (
+	send_otp_email,
+	send_password_reset_email,
+)
+from app.services.contact_email import send_contact_feedback_email
 
 logger = logging.getLogger(__name__)
 
@@ -30,4 +33,13 @@ def send_password_reset_email_task(self, to_email: str, reset_token: str) -> Non
 		send_password_reset_email(to_email, reset_token)
 	except Exception as exc:
 		logger.warning("Password reset email task failed (retrying): %s", exc, exc_info=True)
+		raise self.retry(exc=exc) from exc
+
+
+@shared_task(bind=True, max_retries=3, default_retry_delay=30)
+def send_contact_feedback_email_task(self, full_name: str, to_email: str, message: str) -> None:
+	try:
+		send_contact_feedback_email(full_name=full_name, to_email=to_email, message=message)
+	except Exception as exc:
+		logger.warning("Contact feedback email task failed (retrying): %s", exc, exc_info=True)
 		raise self.retry(exc=exc) from exc

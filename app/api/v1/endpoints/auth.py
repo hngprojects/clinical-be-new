@@ -31,26 +31,22 @@ from app.schemas.auth import (
 	VerifyOtpRequest,
 )
 from app.schemas.user import UserResponse
-from app.services.auth.blocklist import is_token_revoked, revoke_token
-from app.services.auth.service import (
+from app.services.auth import (
 	authenticate_credentials,
 	authenticate_otp,
-	otp_ttl_seconds,
-	resend_otp,
-	signup_user,
-)
-from app.services.auth.tokens import (
 	create_access_token,
+	create_password_reset,
 	create_refresh_token,
 	decode_access_token,
 	decode_refresh_token,
+	otp_ttl_seconds,
+	resend_otp,
+	reset_password,
 	revoke_refresh_token,
 	rotate_all_tokens,
+	signup_user,
 )
-from app.services.auth_service import (
-	create_password_reset,
-	reset_password,
-)
+from app.services.auth.blocklist import is_token_revoked, revoke_token
 from app.services.oauth import (
 	exchange_google_code,
 	fetch_google_user_info,
