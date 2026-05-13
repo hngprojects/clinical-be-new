@@ -44,12 +44,15 @@ async def get_case(
 	case_id: UUID,
 	*,
 	user: User | None = None,
+	guest_session_id: str | None = None,
 ) -> MedicalCase:
-	"""Fetch a single case. If *user* is provided, enforces ownership."""
+	"""Fetch a single case, enforcing ownership by user or guest_session_id."""
 	case = await case_repo.get_by_id(case_id)
 	if case is None:
 		raise NotFoundError("Medical case not found.")
 	if user is not None and case.user_id != user.id:
+		raise ForbiddenError("You do not have access to this case.")
+	if user is None and guest_session_id is not None and case.guest_session_id != guest_session_id:
 		raise ForbiddenError("You do not have access to this case.")
 	return case
 

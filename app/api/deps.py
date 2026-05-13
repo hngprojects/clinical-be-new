@@ -2,7 +2,7 @@ from typing import Annotated
 from uuid import UUID
 
 import jwt
-from fastapi import Depends
+from fastapi import Depends, Header
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -127,3 +127,43 @@ async def get_current_user(
 
 
 CurrentUser = Annotated[User, Depends(get_current_user)]
+
+
+async def get_optional_user(
+	user_repo: UserRepo,
+	blocklist_repo: TokenBlocklistRepo,
+	credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+) -> User | None:
+	"""Resolve the authenticated user if a valid Bearer token is present, otherwise None."""
+	if credentials is None or credentials.scheme.lower() != "bearer":
+		return None
+	try:
+		payload = decode_access_token(credentials.credentials)
+	except jwt.PyJWTError:
+		return None
+
+	jti = payload.get("jti")
+	if not jti or await blocklist_repo.is_revoked(jti):
+		return None
+
+	subject = payload.get("sub")
+	if not subject:
+		return None
+
+	try:
+		user_id = UUID(str(subject))
+	except ValueError:
+		return None
+
+	user = await user_repo.get_by_id(user_id)
+	if user is None or not user.is_active or not user.is_email_verified:
+		return None
+	return user
+
+
+def get_guest_session_id(x_guest_session_id: str | None = Header(None)) -> str | None:
+	return x_guest_session_id
+
+
+OptionalUser = Annotated[User | None, Depends(get_optional_user)]
+GuestSessionId = Annotated[str | None, Depends(get_guest_session_id)]

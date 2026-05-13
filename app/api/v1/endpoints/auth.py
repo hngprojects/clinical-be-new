@@ -173,6 +173,7 @@ async def verify_otp(
 	)
 
 
+# TODO: Move to service layer and add rate-limiting to prevent abuse
 @router.post(
 	"/resend-otp",
 	response_model=SuccessResponse[OtpDispatchResponse],
@@ -332,7 +333,7 @@ async def google_callback(
 
 	settings = get_settings()
 	redirect_url = f"{settings.FRONTEND_AUTH_CALLBACK_URL}?{urlencode({'access_token': app_access_token})}"
-	return RedirectResponse(url=redirect_url, headers=response.headers)
+	return RedirectResponse(url=redirect_url)
 
 
 # Token refresh

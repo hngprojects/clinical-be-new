@@ -32,6 +32,25 @@ class LabResultCreate(LabResultBase):
 	medical_case_id: UUID
 
 
+class UploadRequest(BaseModel):
+	"""Single-action upload schema.
+
+	The frontend sends this when a user selects a file.  The backend creates
+	the MedicalCase and the LabResult atomically, then fires the pipeline.
+	No prior case creation step is needed.
+	"""
+
+	file: FileObject
+	guest_session_id: str | None = None
+
+	@field_validator("file", mode="before")
+	@classmethod
+	def parse_file(cls, v: Any) -> Any:
+		if isinstance(v, dict):
+			return FileObject(**v)
+		return v
+
+
 class LabResultUpdate(BaseModel):
 	"""Schema for updating a lab result after OCR processing."""
 
@@ -48,5 +67,14 @@ class LabResultResponse(LabResultBase):
 	extracted_values: dict[str, Any] | None = None
 	ocr_completed_at: datetime | None = None
 	created_at: datetime
+
+	model_config = ConfigDict(from_attributes=True)
+
+
+class UploadResponse(BaseModel):
+	"""Response after a successful upload."""
+
+	case_id: UUID
+	lab_result: LabResultResponse
 
 	model_config = ConfigDict(from_attributes=True)

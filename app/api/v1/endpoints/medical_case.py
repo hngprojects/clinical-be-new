@@ -2,7 +2,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Query, status
 
-from app.api.deps import CurrentUser, MedicalCaseRepo
+from app.api.deps import CurrentUser, GuestSessionId, MedicalCaseRepo, OptionalUser
 from app.core.responses import SuccessResponse
 from app.schemas.medical_case import MedicalCaseResponse
 from app.services.medical_case import (
@@ -61,11 +61,12 @@ async def list_mine(
 )
 async def retrieve(
 	case_id: UUID,
-	current_user: CurrentUser,
+	current_user: OptionalUser,
+	guest_session_id: GuestSessionId,
 	case_repo: MedicalCaseRepo,
 ) -> SuccessResponse[MedicalCaseResponse]:
-	"""Retrieve a single medical case (ownership enforced)."""
-	case = await get_case(case_repo, case_id, user=current_user)
+	"""Retrieve a single medical case (ownership enforced by user or guest_session_id)."""
+	case = await get_case(case_repo, case_id, user=current_user, guest_session_id=guest_session_id)
 	return SuccessResponse(
 		message="OK",
 		data=MedicalCaseResponse.model_validate(case),
