@@ -65,3 +65,8 @@ version = "0.1.0"
 version_files = [
     "pyproject.toml:version"
 ]
+
+[tool.uv.workspace]
+members = [
+    "template",
+]
