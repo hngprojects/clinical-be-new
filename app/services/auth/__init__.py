@@ -9,7 +9,14 @@ from app.services.auth.service import (
 	resend_otp,
 	signup_user,
 )
-from app.services.auth.tokens import create_access_token, decode_access_token
+from app.services.auth.tokens import (
+	create_access_token,
+	create_refresh_token,
+	decode_access_token,
+	decode_refresh_token,
+	revoke_refresh_token,
+	rotate_all_tokens,
+)
 
 __all__ = [
 	"signup_user",
@@ -20,5 +27,9 @@ __all__ = [
 	"verify_otp_for_user",
 	"send_otp_email",
 	"create_access_token",
+	"create_refresh_token",
 	"decode_access_token",
+	"decode_refresh_token",
+	"revoke_refresh_token",
+	"rotate_all_tokens",
 ]

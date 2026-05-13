@@ -31,6 +31,17 @@ async def create_password_reset(
 	return raw
 
 
+async def delete_password_reset_by_raw_token(
+	reset_repo: PasswordResetRepository,
+	raw_token: str,
+) -> None:
+	"""Delete a password-reset token row matching the raw token. No-op if missing."""
+	h = hash_opaque_token(raw_token)
+	row = await reset_repo.get_by_token_hash(h)
+	if row is not None:
+		await reset_repo.delete(row)
+
+
 async def reset_password(
 	reset_repo: PasswordResetRepository,
 	user_repo: UserRepository,

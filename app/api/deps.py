@@ -11,6 +11,7 @@ from app.db.session import get_session
 from app.models.user import User
 from app.repositories.ai_interpretation import AIInterpretationRepository
 from app.repositories.chat import ChatRepository
+from app.repositories.contact import ContactRepository
 from app.repositories.lab_result import LabResultRepository
 from app.repositories.medical_case import MedicalCaseRepository
 from app.repositories.notification import NotificationRepository
@@ -67,6 +68,10 @@ def get_waitlist_repo(session: DBSession) -> WaitlistRepository:
 	return WaitlistRepository(session)
 
 
+def get_contact_repo(session: DBSession) -> ContactRepository:
+	return ContactRepository(session)
+
+
 # Annotated shortcuts
 UserRepo = Annotated[UserRepository, Depends(get_user_repo)]
 OtpRepo = Annotated[OtpRepository, Depends(get_otp_repo)]
@@ -78,6 +83,7 @@ AIInterpretationRepo = Annotated[AIInterpretationRepository, Depends(get_ai_inte
 ChatRepo = Annotated[ChatRepository, Depends(get_chat_repo)]
 NotificationRepo = Annotated[NotificationRepository, Depends(get_notification_repo)]
 WaitlistRepo = Annotated[WaitlistRepository, Depends(get_waitlist_repo)]
+ContactRepo = Annotated[ContactRepository, Depends(get_contact_repo)]
 
 
 # Auth guard

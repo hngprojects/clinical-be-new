@@ -3,8 +3,8 @@ from datetime import datetime, timezone
 from typing import Annotated
 from urllib.parse import urlencode
 
-from fastapi import APIRouter, Depends, status
-from fastapi.responses import RedirectResponse
+from fastapi import APIRouter, Cookie, Depends, status
+from fastapi.responses import RedirectResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials
 
 from app.api.deps import (
@@ -17,11 +17,11 @@ from app.api.deps import (
 	bearer_scheme,
 )
 from app.core.config import get_settings
+from app.core.exceptions import UnauthorizedError
 from app.core.responses import SuccessResponse
 from app.models.otp import OtpPurpose
 from app.schemas.auth import (
 	ForgotPasswordRequest,
-	GoogleAuthData,
 	LoginRequest,
 	OtpDispatchResponse,
 	ResendOtpRequest,
@@ -31,7 +31,7 @@ from app.schemas.auth import (
 	VerifyOtpRequest,
 )
 from app.schemas.user import UserResponse
-from app.services.auth.blocklist import revoke_token
+from app.services.auth.blocklist import is_token_revoked, revoke_token
 from app.services.auth.service import (
 	authenticate_credentials,
 	authenticate_otp,
@@ -39,7 +39,14 @@ from app.services.auth.service import (
 	resend_otp,
 	signup_user,
 )
-from app.services.auth.tokens import create_access_token, decode_access_token
+from app.services.auth.tokens import (
+	create_access_token,
+	create_refresh_token,
+	decode_access_token,
+	decode_refresh_token,
+	revoke_refresh_token,
+	rotate_all_tokens,
+)
 from app.services.auth_service import (
 	create_password_reset,
 	reset_password,
@@ -61,6 +68,18 @@ def _mask_email(email: str) -> str:
 		local, domain = email.split("@", 1)
 		return f"{local[:2]}***@{domain}"
 	return "***"
+
+
+def _set_refresh_cookie(response: Response, refresh_token: str) -> None:
+	settings = get_settings()
+	response.set_cookie(
+		key="refresh_token",
+		value=refresh_token,
+		httponly=True,
+		secure=settings.COOKIE_SECURE,
+		samesite=settings.COOKIE_SAMESITE,
+		max_age=settings.JWT_REFRESH_TOKEN_EXPIRES_MINUTES * 60,
+	)
 
 
 # Signup
@@ -108,15 +127,21 @@ async def signup(
 async def login(
 	payload: LoginRequest,
 	user_repo: UserRepo,
+	response: Response,
 ) -> SuccessResponse[TokenResponse]:
-	"""Authenticate with email + password. Returns a JWT on success."""
-	user, access_token, ttl_seconds = await authenticate_credentials(
+	"""Authenticate with email + password. Returns a JWT on success.
+
+	The account must have a verified email before login is permitted.
+	"""
+	user, access_token, ttl_seconds, refresh_token = await authenticate_credentials(
 		user_repo, email=payload.email, password=payload.password
 	)
+	_set_refresh_cookie(response, refresh_token)
 	return SuccessResponse(
 		message="Logged in successfully.",
 		data=TokenResponse(
 			access_token=access_token,
+			token_type="bearer",
 			expires_in=ttl_seconds,
 			user=UserResponse.model_validate(user),
 		),
@@ -132,14 +157,16 @@ async def verify_otp(
 	payload: VerifyOtpRequest,
 	user_repo: UserRepo,
 	otp_repo: OtpRepo,
+	response: Response,
 ) -> SuccessResponse[TokenResponse]:
 	"""Verify the email-verification OTP sent after signup."""
-	user, access_token, ttl_seconds = await authenticate_otp(
+	user, access_token, ttl_seconds, refresh_token = await authenticate_otp(
 		user_repo,
 		otp_repo,
 		email=payload.email,
 		code=payload.code,
 	)
+	_set_refresh_cookie(response, refresh_token)
 	return SuccessResponse(
 		message="Email verified. Welcome!",
 		data=TokenResponse(
@@ -206,7 +233,11 @@ async def forgot_password(
 	reset_repo: PasswordResetRepo,
 	session: DBSession,
 ) -> SuccessResponse:
-	"""Send a password-reset email. Always returns 200 to prevent user enumeration."""
+	"""Send a password-reset email.
+
+	Always returns 200 regardless of whether the email is registered to prevent
+	user-enumeration attacks.
+	"""
 	user = await user_repo.get_by_email(request.email.strip().lower())
 	if user:
 		raw = await create_password_reset(reset_repo, user)
@@ -244,12 +275,26 @@ async def logout(
 	current_user: CurrentUser,
 	blocklist_repo: TokenBlocklistRepo,
 	credentials: Annotated[HTTPAuthorizationCredentials, Depends(bearer_scheme)],
+	refresh_token: Annotated[str | None, Cookie()] = None,
 ) -> SuccessResponse:
-	"""Revoke the current access token."""
-	payload = decode_access_token(credentials.credentials)
-	jti: str = payload["jti"]
-	expires_at = datetime.fromtimestamp(payload["exp"], tz=timezone.utc)
-	await revoke_token(blocklist_repo, jti=jti, user_id=current_user.id, expires_at=expires_at)
+	"""Revoke the current access token and refresh token.
+
+	Both the access JWT and the refresh JWT are added to the server-side
+	blocklist so they cannot be reused even if their intrinsic TTL has not yet
+	elapsed.  The client is still responsible for discarding the tokens locally.
+	"""
+	if not refresh_token:
+		raise UnauthorizedError("Refresh token cookie is required")
+	access_token_payload = decode_access_token(credentials.credentials)
+	access_token_jti: str = access_token_payload["jti"]
+	access_token_expires_at = datetime.fromtimestamp(access_token_payload["exp"], tz=timezone.utc)
+	await revoke_token(
+		blocklist_repo,
+		jti=access_token_jti,
+		user_id=current_user.id,
+		expires_at=access_token_expires_at,
+	)
+	await revoke_refresh_token(refresh_token, blocklist_repo)
 	return SuccessResponse(message="Logged out successfully.")
 
 
@@ -270,31 +315,58 @@ async def google_login() -> RedirectResponse:
 	return RedirectResponse(url=google_auth_url)
 
 
-@router.get("/google/callback", response_model=SuccessResponse[GoogleAuthData])
+@router.get("/google/callback")
 async def google_callback(
 	code: str,
 	user_repo: UserRepo,
-) -> SuccessResponse[GoogleAuthData]:
-	"""Handle the Google OAuth callback and return app tokens."""
+	response: Response,
+) -> RedirectResponse:
+	"""Handle the Google OAuth callback and redirect to the frontend with app tokens."""
 	token_data = await exchange_google_code(code)
 	google_access_token = token_data.get("access_token")
-
 	if not google_access_token:
-		from app.core.exceptions import UnauthorizedError
-
 		raise UnauthorizedError("Google access token not found")
 
 	google_user = await fetch_google_user_info(google_access_token)
 	user = await get_or_create_google_user(user_repo, google_user)
 
-	app_access_token, ttl_seconds = create_access_token(user.id)
+	app_access_token, _ttl_seconds = create_access_token(user.id)
+	refresh_token = await create_refresh_token(user.id)
+	_set_refresh_cookie(response, refresh_token)
 
-	return SuccessResponse[GoogleAuthData](
-		message="Google authentication successful",
-		data=GoogleAuthData(
-			access_token=app_access_token,
-			refresh_token=app_access_token,
+	settings = get_settings()
+	redirect_url = f"{settings.FRONTEND_AUTH_CALLBACK_URL}?{urlencode({'access_token': app_access_token})}"
+	return RedirectResponse(url=redirect_url, headers=response.headers)
+
+
+# Token refresh
+@router.post("/refresh", response_model=SuccessResponse[TokenResponse])
+async def refresh(
+	user_repo: UserRepo,
+	blocklist_repo: TokenBlocklistRepo,
+	response: Response,
+	refresh_token: Annotated[str | None, Cookie()] = None,
+) -> SuccessResponse[TokenResponse]:
+	"""Refresh the access and refresh tokens.
+
+	Validates the inbound refresh token, ensures it has not been revoked,
+	revokes it (rotation), then mints a fresh access/refresh pair.
+	"""
+	if not refresh_token:
+		raise UnauthorizedError("Refresh token cookie is required")
+	payload = decode_refresh_token(refresh_token)
+	refresh_token_jti: str = payload["jti"]
+	if await is_token_revoked(blocklist_repo, refresh_token_jti):
+		raise UnauthorizedError("Refresh token has been revoked")
+	await revoke_refresh_token(refresh_token, blocklist_repo)
+	tokens = await rotate_all_tokens(user_repo=user_repo, refresh_token=refresh_token)
+
+	_set_refresh_cookie(response, tokens["refresh_token"])
+	return SuccessResponse(
+		message="Tokens refreshed",
+		data=TokenResponse(
+			access_token=tokens["access_token"],
 			token_type="bearer",
-			user=UserResponse.model_validate(user),
+			expires_in=tokens["expires_in"],
 		),
 	)
