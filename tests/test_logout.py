@@ -9,7 +9,7 @@ from httpx import AsyncClient
 from app.api.deps import get_current_user, get_session
 from app.main import app
 from app.models.user import User, UserRole
-from app.services.auth.tokens import create_access_token
+from app.services.auth.tokens import create_access_token, create_refresh_token
 
 pytestmark = pytest.mark.asyncio
 
@@ -76,15 +76,20 @@ async def test_logout_success(client: AsyncClient) -> None:
 	"""A valid token should be accepted and revoked, returning 200."""
 	user = _make_user()
 	token, _ = create_access_token(user.id)
+	refresh = await create_refresh_token(user.id)
 
 	app.dependency_overrides[get_session] = _override_get_session
 	# Bypass the real get_current_user (which needs a real DB)
 	app.dependency_overrides[get_current_user] = lambda: user
 
-	with patch("app.api.v1.endpoints.auth.revoke_token", new_callable=AsyncMock) as mock_revoke:
+	with (
+		patch("app.api.v1.endpoints.auth.revoke_token", new_callable=AsyncMock) as mock_revoke,
+		patch("app.api.v1.endpoints.auth.revoke_refresh_token", new_callable=AsyncMock),
+	):
 		response = await client.post(
 			"/api/v1/auth/logout",
 			headers={"Authorization": f"Bearer {token}"},
+			cookies={"refresh_token": refresh},
 		)
 
 	assert response.status_code == 200, response.text
@@ -98,15 +103,20 @@ async def test_token_rejected_after_logout(client: AsyncClient) -> None:
 	"""After logout the same token must be refused by the auth guard (401)."""
 	user = _make_user()
 	token, _ = create_access_token(user.id)
+	refresh = await create_refresh_token(user.id)
 
 	# First request: logout succeeds
 	app.dependency_overrides[get_session] = _override_get_session
 	app.dependency_overrides[get_current_user] = lambda: user
 
-	with patch("app.api.v1.endpoints.auth.revoke_token", new_callable=AsyncMock):
+	with (
+		patch("app.api.v1.endpoints.auth.revoke_token", new_callable=AsyncMock),
+		patch("app.api.v1.endpoints.auth.revoke_refresh_token", new_callable=AsyncMock),
+	):
 		logout_resp = await client.post(
 			"/api/v1/auth/logout",
 			headers={"Authorization": f"Bearer {token}"},
+			cookies={"refresh_token": refresh},
 		)
 	assert logout_resp.status_code == 200
 

@@ -24,6 +24,8 @@ from app.db.session import AsyncSessionLocal
 from app.models.user import User, UserRole
 from app.services.auth.tokens import create_access_token
 
+pytestmark = pytest.mark.usefixtures("setup_database")
+
 API = "/api/v1"
 
 # Patch target: the task object in the module where .delay() is looked up

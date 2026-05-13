@@ -21,7 +21,7 @@ from app.services.auth.tokens import create_access_token
 
 # ── Schema lifecycle ──────────────────────────────────────────────────────────
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 async def setup_database():
     """
     Create all tables once at the start of the test session, drop them at the end.
