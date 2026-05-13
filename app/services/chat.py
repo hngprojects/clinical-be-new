@@ -14,12 +14,15 @@ async def send_message(
 	payload: ChatCreate,
 	*,
 	user: User | None = None,
+	guest_session_id: str | None = None,
 ) -> Chat:
 	"""Create a new chat message within a medical case."""
 	case = await case_repo.get_by_id(payload.medical_case_id)
 	if case is None:
 		raise NotFoundError("Medical case not found.")
 	if user is not None and case.user_id != user.id:
+		raise ForbiddenError("You do not have access to this case.")
+	if user is None and guest_session_id is not None and case.guest_session_id != guest_session_id:
 		raise ForbiddenError("You do not have access to this case.")
 
 	message = Chat(

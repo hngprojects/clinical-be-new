@@ -4,9 +4,50 @@ from uuid import UUID
 
 from app.core.exceptions import NotFoundError
 from app.models.lab_result import LabResult, OCRStatus
+from app.models.medical_case import MedicalCase, MedicalCaseStatus
+from app.models.user import User
 from app.repositories.lab_result import LabResultRepository
 from app.repositories.medical_case import MedicalCaseRepository
-from app.schemas.lab_result import LabResultCreate, LabResultUpdate
+from app.schemas.lab_result import LabResultCreate, LabResultUpdate, UploadRequest
+
+
+async def upload_lab_result(
+	lab_repo: LabResultRepository,
+	case_repo: MedicalCaseRepository,
+	payload: UploadRequest,
+	user: User | None,
+) -> tuple[MedicalCase, LabResult]:
+	"""Create a MedicalCase + LabResult in one action and fire the pipeline.
+
+	This is the primary upload path.  The user never needs to create a case
+	explicitly — the act of uploading the file is what creates it.
+	"""
+	from app.tasks.pipeline import run_lab_result_pipeline
+
+	# Create the case
+	case = MedicalCase(
+		user_id=user.id if user else None,
+		guest_session_id=payload.guest_session_id if not user else None,
+		status=MedicalCaseStatus.PENDING,
+	)
+	case_repo.add(case)
+	await case_repo.commit()
+	await case_repo.refresh(case)
+
+	# Attach the lab result
+	lab_result = LabResult(
+		medical_case_id=case.id,
+		file=payload.file.model_dump(),
+		ocr_status=OCRStatus.PENDING,
+	)
+	lab_repo.add(lab_result)
+	await lab_repo.commit()
+	await lab_repo.refresh(lab_result)
+
+	# Fire the pipeline
+	run_lab_result_pipeline.delay(str(lab_result.id))
+
+	return case, lab_result
 
 
 async def create_lab_result(
@@ -14,7 +55,9 @@ async def create_lab_result(
 	case_repo: MedicalCaseRepository,
 	payload: LabResultCreate,
 ) -> LabResult:
-	"""Attach a new lab result to an existing medical case."""
+	"""Attach a new lab result to an existing medical case and fire the pipeline."""
+	from app.tasks.pipeline import run_lab_result_pipeline  # local import avoids circular dependency at module load
+
 	case = await case_repo.get_by_id(payload.medical_case_id)
 	if case is None:
 		raise NotFoundError("Medical case not found.")
@@ -27,6 +70,9 @@ async def create_lab_result(
 	lab_repo.add(lab_result)
 	await lab_repo.commit()
 	await lab_repo.refresh(lab_result)
+
+	run_lab_result_pipeline.delay(str(lab_result.id))
+
 	return lab_result
 
 

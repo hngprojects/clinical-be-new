@@ -47,6 +47,18 @@ class Settings(BaseSettings):
 	CELERY_BROKER_URL: str = "redis://localhost:6379/0"
 	CELERY_RESULT_BACKEND: str | None = None
 
+	AI_PROVIDER: str = "auto"
+
+	OPENAI_API_KEY: str = ""
+	OPENAI_MODEL: str = "gpt-4o-mini"
+
+	GEMINI_API_KEY: str = ""
+	GEMINI_MODEL: str = "gemini-2.0-flash"
+
+	PIPELINE_TIMEOUT_SECONDS: int = 30
+
+	FRONTEND_URL: str = ""
+
 	@field_validator("RESEND_FROM_EMAIL", mode="after")
 	@classmethod
 	def resend_from_email_required_when_resend_enabled(cls, v: str, info: object) -> str:
@@ -57,8 +69,8 @@ class Settings(BaseSettings):
 		return v
 
 	# Password reset
-	FRONTEND_RESET_PASSWORD_URL: str = "https://staging.clinical-tool.hng14.com/reset-password"
-	FRONTEND_AUTH_CALLBACK_URL: str = "https://staging.clinical-tool.hng14.com/auth/callback"
+	FRONTEND_RESET_PASSWORD_URL: str = f"{FRONTEND_URL}/reset-password"
+	FRONTEND_AUTH_CALLBACK_URL: str = f"{FRONTEND_URL}/auth/callback"
 	PASSWORD_RESET_TOKEN_EXPIRES_MINUTES: int = 60
 
 
